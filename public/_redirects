@@ -1,0 +1,2 @@
+/api/*   https://uw-backend.sebastian-gonzalez243.workers.dev/api/:splat   200
+/submit  https://uw-backend.sebastian-gonzalez243.workers.dev/submit      200

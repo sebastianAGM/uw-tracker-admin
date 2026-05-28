@@ -1,0 +1,5 @@
+package com.uw.admin;
+
+import com.getcapacitor.BridgeActivity;
+
+public class MainActivity extends BridgeActivity {}

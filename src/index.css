@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+/* Base layout */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/* Force light scheme */
+:root {
+  color-scheme: light;
+}
+
+/* App base colors */
+html,
+body {
+  background-color: #f3f4f6;
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+/* Keep light even if system is dark */
+@media (prefers-color-scheme: dark) {
+  html,
+  body {
+    background-color: #f3f4f6 !important;
+    color: #0f172a !important;
+  }
+}
+
+/* Remove number input spinners */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* Remove tap highlight on mobile */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Remove focus outline on tap */
+*:focus {
+  outline: none !important;
+}
