@@ -29,13 +29,12 @@ import {
   RatesPayload,
 } from "./lib/uwCalc";
 
+import { useAdminData } from "./AdminDataContext";
+import { getStoredToken } from "./lib/priceApi";
+
 // ================== CONFIG ==================
 const API_BASE = "https://uw-backend.sebastian-gonzalez243.workers.dev";
-const PRICE_LISTS_ENDPOINT = `${API_BASE}/api/price-lists`;
-const PRICE_LIST_DETAILS_ENDPOINT = (id: string) => `${PRICE_LISTS_ENDPOINT}/${id}`;
-const SUBMISSIONS_ENDPOINT = `${API_BASE}/api/submissions`;
-const EXPENSES_ENDPOINT = `${API_BASE}/api/expenses`;
-const ADMIN_TOKEN = "3amigos";
+const PRICE_LIST_DETAILS_ENDPOINT = (id: string) => `${API_BASE}/api/price-lists/${id}`;
 const PROJECT_VISIBLE_LIMIT = 50;
 
 // 👇 Ajusta aquí si tus task_keys reales son otros
@@ -893,26 +892,37 @@ function calcMDULaborCost(crewCount: number, workedHours: number, hourRate: numb
 
 // ================== MAIN COMPONENT ==================
 const AdminOverview: React.FC = () => {
-  const [lists, setLists] = useState<PriceListSummary[]>([]);
-  const [submissions, setSubmissions] = useState<SubmissionRow[]>([]);
+  // ── Data from shared context (no fetch here) ──────────────
+  const {
+    lists: rawLists,
+    submissions,
+    expenses: expensesPayload,
+    rates,
+    loading,
+    error,
+    refresh,
+  } = useAdminData();
 
-  const [rates, setRates] = useState<RatesPayload>({ crew_per_day: 0, truck_per_day: 0 });
+  // Derive lists (sorted) from context
+  const lists = useMemo(() => sortPriceLists(rawLists as PriceListSummary[]), [rawLists]);
 
-  const [fixedOverheadPerDay, setFixedOverheadPerDay] = useState<number>(0);
+  // Derive fixedOverheadPerDay from expenses payload
+  const fixedOverheadPerDay = useMemo(() => {
+    const payload = (expensesPayload as any)?.[0]?.payload || {};
+    const fixedItems = Array.isArray(payload.fixed) ? payload.fixed : [];
+    const fixedTotal = fixedItems.reduce((sum: number, it: any) => sum + (Number(it.amount) || 0), 0);
+    return fixedTotal > 0 ? fixedTotal / 22 : 0;
+  }, [expensesPayload]);
+
   const [showAllProjects, setShowAllProjects] = useState(false);
-
   const [detailsById, setDetailsById] = useState<Record<string, PriceListDetails>>({});
   const [detailsLoading, setDetailsLoading] = useState<Record<string, boolean>>({});
-
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   const [statusFilter, setStatusFilter] = useState<"active" | "completed" | "all">("active");
   const [openIds, setOpenIds] = useState<Set<string>>(() => new Set());
-
   const [selectedDayByProject, setSelectedDayByProject] = useState<Record<string, string>>({});
 
   async function ensureListDetailsLoaded(listId: string) {
+    const token = getStoredToken();
     if (!listId) return;
     if (detailsById[listId] || detailsLoading[listId]) return;
 
@@ -922,7 +932,7 @@ const AdminOverview: React.FC = () => {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${ADMIN_TOKEN}`,
+          Authorization: token ? `Bearer ${token}` : "",
         },
       });
 
@@ -947,130 +957,7 @@ const AdminOverview: React.FC = () => {
     }
   }
 
-  useEffect(() => {
-  let cancelled = false;
 
-  async function loadOverview() {
-    if (!lists.length) {
-  setLoading(true);
-}
-    setError(null);
-
-    try {
-      // 1) Cargar primero los projects / price lists
-      console.time("overview-total-price-lists");
-console.time("overview-fetch-price-lists");
-
-const resLists = await fetch(PRICE_LISTS_ENDPOINT, {
-  method: "GET",
-  headers: {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${ADMIN_TOKEN}`,
-  },
-});
-
-console.timeEnd("overview-fetch-price-lists");
-
-console.time("overview-json-price-lists");
-const jsonLists: any = await resLists.json().catch(() => ({}));
-console.timeEnd("overview-json-price-lists");
-
-if (!resLists.ok || jsonLists.ok === false) {
-  throw new Error(
-    jsonLists.error || `Error loading price lists (${resLists.status})`
-  );
-}
-
-console.time("overview-normalize-price-lists");
-const rawLists = normalizeRows(jsonLists) as PriceListSummary[];
-console.timeEnd("overview-normalize-price-lists");
-
-console.time("overview-sort-price-lists");
-const sorted = sortPriceLists(rawLists);
-console.timeEnd("overview-sort-price-lists");
-
-console.log("[overview price lists count]", rawLists.length);
-
-if (cancelled) return;
-
-setLists(sorted);
-
-console.timeEnd("overview-total-price-lists");
-
-requestAnimationFrame(() => {
-  setLoading(false);
-});
-
-      // 2) Cargar submissions y expenses después
-      const [resSubs, resExpenses] = await Promise.all([
-        fetch(`${SUBMISSIONS_ENDPOINT}?limit=500`, { method: "GET" }),
-        fetch(EXPENSES_ENDPOINT, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${ADMIN_TOKEN}`,
-          },
-        }),
-      ]);
-
-      if (cancelled) return;
-
-      const jsonSubs: any = await resSubs.json().catch(() => ({}));
-
-      if (!resSubs.ok || jsonSubs.ok === false) {
-        console.warn(
-          "[AdminOverview] submissions error:",
-          jsonSubs?.error || resSubs.status
-        );
-        setSubmissions([]);
-      } else {
-        const rows = normalizeRows(jsonSubs.rows ?? jsonSubs) as SubmissionRow[];
-        setSubmissions(rows);
-      }
-
-      const jsonExpenses: any = await resExpenses.json().catch(() => ({}));
-
-      if (!resExpenses.ok || jsonExpenses.ok === false) {
-        console.warn(
-          "[AdminOverview] expenses error:",
-          jsonExpenses?.error || resExpenses.status
-        );
-        setRates({ crew_per_day: 0, truck_per_day: 0 });
-        setFixedOverheadPerDay(0);
-      } else {
-        const payload = jsonExpenses?.payload || {};
-        const r = payload.rates || {};
-
-        setRates({
-          crew_per_day: Number(r.crew_per_day ?? 0) || 0,
-          truck_per_day: Number(r.truck_per_day ?? 0) || 0,
-        });
-
-        const fixedItems = Array.isArray(payload.fixed) ? payload.fixed : [];
-        const fixedTotal = fixedItems.reduce(
-          (sum: number, it: any) => sum + (Number(it.amount) || 0),
-          0
-        );
-
-        const workingDaysPerMonth = 22;
-        const perDayGlobal = fixedTotal > 0 ? fixedTotal / workingDaysPerMonth : 0;
-
-        setFixedOverheadPerDay(perDayGlobal);
-      }
-    } catch (e: any) {
-      if (cancelled) return;
-      console.error(e);
-      setError(e.message || "Error loading overview");
-      setLoading(false);
-    }
-  }
-
-  loadOverview();
-
-  return () => {
-    cancelled = true;
-  };
-}, []);
 
   const filteredLists = useMemo(() => {
     return lists.filter((pl) => {
